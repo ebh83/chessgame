@@ -213,38 +213,59 @@ export default function GamePage() {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const pollRef = useRef(null);
+  const moveInFlightRef = useRef(false);
+  const localMoveCountRef = useRef(-1);
+
+  // Only update game state if the server data is at least as fresh as local
+  const updateGameIfNewer = useCallback((serverGame) => {
+    if (!serverGame || !serverGame.board) return;
+    const serverMoveCount = serverGame.moveCount || 0;
+    if (serverMoveCount >= localMoveCountRef.current) {
+      localMoveCountRef.current = serverMoveCount;
+      setGame(serverGame);
+    }
+  }, []);
 
   const fetchGame = useCallback(async () => {
+    // Skip poll if a move request is in-flight
+    if (moveInFlightRef.current) return;
     try {
-      const res = await fetch(`/api/games/${gameId}?t=${Date.now()}`, {
+      const res = await fetch(`/api/games/${gameId}?_=${Date.now()}`, {
         cache: "no-store",
+        headers: { "Pragma": "no-cache" },
       });
       if (!res.ok) { setError("Game not found"); setLoading(false); return; }
       const data = await res.json();
-      setGame(data);
+      if (data.error) return;
+      updateGameIfNewer(data);
       setLoading(false);
     } catch {
-      setError("Failed to load game");
+      // Silently ignore poll errors - will retry on next interval
       setLoading(false);
     }
-  }, [gameId]);
+  }, [gameId, updateGameIfNewer]);
 
+  // Initial load
   useEffect(() => {
     const color = sessionStorage.getItem(`chess:${gameId}`);
     if (color) setMyColor(color);
     fetchGame();
   }, [gameId, fetchGame]);
 
+  // Poll every 3 seconds while game is active
   useEffect(() => {
     if (!game || game.status !== "playing") {
-      clearInterval(pollRef.current);
+      if (pollRef.current) clearInterval(pollRef.current);
       return;
     }
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(fetchGame, 3000);
-    return () => clearInterval(pollRef.current);
-  }, [game?.status, game?.turn, myColor, fetchGame]);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [game?.status, fetchGame]);
 
   const handleMove = async (fromR, fromC, toR, toC, promoteTo) => {
+    // Block polls while move is in-flight
+    moveInFlightRef.current = true;
     try {
       const res = await fetch(`/api/games/${gameId}`, {
         method: "PUT",
@@ -257,10 +278,15 @@ export default function GamePage() {
       });
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
+      // Trust the server response - update immediately
+      localMoveCountRef.current = data.moveCount || 0;
       setGame(data);
     } catch {
-      setError("Failed to send move. Retrying...");
-      setTimeout(fetchGame, 1000);
+      setError("Failed to send move");
+      fetchGame();
+    } finally {
+      // Brief delay before allowing polls again to avoid stale reads
+      setTimeout(() => { moveInFlightRef.current = false; }, 1500);
     }
   };
 
@@ -321,7 +347,10 @@ export default function GamePage() {
               if (data.color) {
                 sessionStorage.setItem(`chess:${gameId}`, data.color);
                 setMyColor(data.color);
-                setGame(data.game);
+                if (data.game) {
+                  localMoveCountRef.current = data.game.moveCount || 0;
+                  setGame(data.game);
+                }
               }
             }}
           >
@@ -444,7 +473,7 @@ export default function GamePage() {
 
       {/* Controls */}
       <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        <button className="btn btn-sm" onClick={fetchGame}>↻ Refresh</button>
+        <button className="btn btn-sm" onClick={() => { moveInFlightRef.current = false; fetchGame(); }}>↻ Refresh</button>
         <button className="btn btn-sm" onClick={() => router.push("/")}>← New Game</button>
       </div>
 
