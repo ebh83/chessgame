@@ -29,6 +29,7 @@ export async function POST(request) {
       updatedAt: Date.now(),
     };
 
+    // kv.set auto-serializes objects to JSON
     await kv.set(`game:${id}`, game, { ex: 604800 });
 
     return Response.json({ id, color });
