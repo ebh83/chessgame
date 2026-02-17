@@ -1,17 +1,30 @@
 import { kv } from "@vercel/kv";
 import { makeMove, getLegalMoves, isWhite, isBlack } from "@/lib/chess";
 
+// Defensive read: handles both auto-deserialized objects and double-stringified strings
 async function getGame(id) {
-  const data = await kv.get(`game:${id}`);
-  return data || null;
+  let data = await kv.get(`game:${id}`);
+  if (!data) return null;
+  // If kv returned a string (double-serialized), parse it
+  if (typeof data === "string") {
+    try { data = JSON.parse(data); } catch { return null; }
+  }
+  // Safety check: if still a string after one parse, try once more
+  if (typeof data === "string") {
+    try { data = JSON.parse(data); } catch { return null; }
+  }
+  return data;
 }
 
 async function saveGame(id, game) {
   game.updatedAt = Date.now();
+  // kv.set auto-serializes objects
   await kv.set(`game:${id}`, game, { ex: 604800 });
 }
 
+// Prevent Vercel from caching this route
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(request, { params }) {
   try {
@@ -20,8 +33,14 @@ export async function GET(request, { params }) {
     if (!game) {
       return Response.json({ error: "Game not found" }, { status: 404 });
     }
-    return Response.json(game, {
-      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+    return new Response(JSON.stringify(game), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        "CDN-Cache-Control": "no-store",
+        "Vercel-CDN-Cache-Control": "no-store",
+      },
     });
   } catch (err) {
     console.error("Get game error:", err);
@@ -101,4 +120,3 @@ export async function PUT(request, { params }) {
     return Response.json({ error: "Failed to update game" }, { status: 500 });
   }
 }
-
