@@ -25,9 +25,8 @@ function PromotionModal({ white, onSelect }) {
           {pieces.map((p) => (
             <button
               key={p}
-              className="promo-btn"
+              className={`promo-btn ${white ? "piece-white" : "piece-black"}`}
               onClick={() => onSelect(p.toUpperCase())}
-              style={{ color: isWhite(p) ? "#f0e6d2" : "#3a2a1a" }}
             >
               {PIECES[p]}
             </button>
@@ -150,16 +149,16 @@ function Board({ game, myColor, inCheck, onMove }) {
     <>
       {promotion && <PromotionModal white={myColor === "w"} onSelect={handlePromotion} />}
       <div className="board-container">
-        <div style={{ display: "flex", paddingLeft: 28 }}>
+        <div style={{ display: "flex", paddingLeft: "var(--label-w)" }}>
           {cols.map((c) => (
-            <div key={c} className="board-label" style={{ width: 68, textAlign: "center", padding: "3px 0" }}>
+            <div key={c} className="board-label" style={{ width: "var(--sq-size)", textAlign: "center", padding: "3px 0" }}>
               {COLS[c]}
             </div>
           ))}
         </div>
         {rows.map((r) => (
           <div key={r} style={{ display: "flex", alignItems: "center" }}>
-            <div className="board-label" style={{ width: 28, textAlign: "center" }}>{8 - r}</div>
+            <div className="board-label" style={{ width: "var(--label-w)", textAlign: "center" }}>{8 - r}</div>
             {cols.map((c) => {
               const piece = game.board[r][c];
               const light = (r + c) % 2 === 0;
@@ -388,7 +387,7 @@ export default function GamePage() {
   return (
     <main style={{
       minHeight: "100vh", display: "flex", flexDirection: "column",
-      alignItems: "center", padding: "0 16px",
+      alignItems: "center", padding: "0 var(--page-pad)",
     }}>
       {/* Header */}
       <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>

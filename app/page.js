@@ -37,7 +37,7 @@ export default function HomePage() {
   return (
     <main style={{
       minHeight: "100vh", display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", padding: "0 16px", gap: 40,
+      alignItems: "center", justifyContent: "center", padding: "0 var(--page-pad)", gap: 40,
     }}>
       {/* Title */}
       <div style={{ textAlign: "center" }}>
@@ -55,7 +55,7 @@ export default function HomePage() {
         <div style={{ fontSize: 18, color: "var(--gold)", marginBottom: 20 }}>
           New Game
         </div>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
           <button
             className="btn btn-accent"
             disabled={creating}
@@ -78,7 +78,7 @@ export default function HomePage() {
         <div style={{ fontSize: 18, color: "var(--gold)", marginBottom: 20 }}>
           Join Game
         </div>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
           <input
             className="game-input"
             type="text"
