@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   PIECES, COLS, isWhite, isBlack, isInCheck,
   getLegalMoves,
 } from "@/lib/chess";
+
+const CAPTURE_ORDER = { Q: 0, R: 1, B: 2, N: 3, P: 4, q: 0, r: 1, b: 2, n: 3, p: 4 };
+const ROWS_ASC = [0, 1, 2, 3, 4, 5, 6, 7];
+const ROWS_DESC = [7, 6, 5, 4, 3, 2, 1, 0];
 
 // ─── Promotion Modal ────────────────────────────────────────────────────────
 
@@ -38,8 +42,7 @@ function PromotionModal({ white, onSelect }) {
 
 function CapturedPieces({ pieces }) {
   if (!pieces || pieces.length === 0) return <div style={{ minHeight: 22 }} />;
-  const order = { Q: 0, R: 1, B: 2, N: 3, P: 4, q: 0, r: 1, b: 2, n: 3, p: 4 };
-  const sorted = [...pieces].sort((a, b) => order[a] - order[b]);
+  const sorted = [...pieces].sort((a, b) => CAPTURE_ORDER[a] - CAPTURE_ORDER[b]);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 1, minHeight: 22 }}>
       {sorted.map((p, i) => (
@@ -75,13 +78,23 @@ function MoveHistory({ moves }) {
 
 // ─── Board ──────────────────────────────────────────────────────────────────
 
-function Board({ game, myColor, onMove }) {
+function Board({ game, myColor, inCheck, onMove }) {
   const [selected, setSelected] = useState(null);
   const [legalMoves, setLegalMoves] = useState([]);
   const [promotion, setPromotion] = useState(null);
 
   const flipped = myColor === "b";
   const isMyTurn = game.turn === myColor && game.status === "playing";
+
+  const isMyPiece = useCallback((piece) => {
+    return piece && (myColor === "w" ? isWhite(piece) : isBlack(piece));
+  }, [myColor]);
+
+  // Convert legal moves to a Set for O(1) lookup in render
+  const legalMoveSet = useMemo(
+    () => new Set(legalMoves.map(([r, c]) => (r << 3) | c)),
+    [legalMoves]
+  );
 
   useEffect(() => { setSelected(null); setLegalMoves([]); }, [game.turn, game.moveCount]);
 
@@ -90,7 +103,7 @@ function Board({ game, myColor, onMove }) {
     const piece = game.board[r][c];
 
     if (selected) {
-      const isLegal = legalMoves.some(([mr, mc]) => mr === r && mc === c);
+      const isLegal = legalMoveSet.has((r << 3) | c);
       if (isLegal) {
         const movingPiece = game.board[selected[0]][selected[1]];
         if (movingPiece.toUpperCase() === "P" && (r === 0 || r === 7)) {
@@ -102,7 +115,7 @@ function Board({ game, myColor, onMove }) {
         setSelected(null); setLegalMoves([]);
         return;
       }
-      if (piece && ((myColor === "w" && isWhite(piece)) || (myColor === "b" && isBlack(piece)))) {
+      if (isMyPiece(piece)) {
         setSelected([r, c]);
         setLegalMoves(getLegalMoves(game.board, r, c, game.enPassant, game.castling));
         return;
@@ -111,7 +124,7 @@ function Board({ game, myColor, onMove }) {
       return;
     }
 
-    if (piece && ((myColor === "w" && isWhite(piece)) || (myColor === "b" && isBlack(piece)))) {
+    if (isMyPiece(piece)) {
       setSelected([r, c]);
       setLegalMoves(getLegalMoves(game.board, r, c, game.enPassant, game.castling));
     }
@@ -122,15 +135,15 @@ function Board({ game, myColor, onMove }) {
     setPromotion(null);
   };
 
-  const rows = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
-  const cols = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
+  const rows = flipped ? ROWS_DESC : ROWS_ASC;
+  const cols = flipped ? ROWS_DESC : ROWS_ASC;
 
-  const inCheck = game.status === "playing" && isInCheck(game.board, game.turn === "w");
   let kingPos = null;
   if (inCheck) {
-    for (let rr = 0; rr < 8; rr++)
+    const kingChar = game.turn === "w" ? "K" : "k";
+    outer: for (let rr = 0; rr < 8; rr++)
       for (let cc = 0; cc < 8; cc++)
-        if (game.board[rr][cc] === (game.turn === "w" ? "K" : "k")) kingPos = [rr, cc];
+        if (game.board[rr][cc] === kingChar) { kingPos = [rr, cc]; break outer; }
   }
 
   return (
@@ -151,7 +164,7 @@ function Board({ game, myColor, onMove }) {
               const piece = game.board[r][c];
               const light = (r + c) % 2 === 0;
               const isSel = selected && selected[0] === r && selected[1] === c;
-              const isLM = legalMoves.some(([mr, mc]) => mr === r && mc === c);
+              const isLM = legalMoveSet.has((r << 3) | c);
               const isLastFrom = game.lastMove?.from[0] === r && game.lastMove?.from[1] === c;
               const isLastTo = game.lastMove?.to[0] === r && game.lastMove?.to[1] === c;
               const isKC = kingPos && kingPos[0] === r && kingPos[1] === c;
@@ -213,6 +226,7 @@ export default function GamePage() {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const pollRef = useRef(null);
+  const retryRef = useRef(null);
 
   const fetchGame = useCallback(async () => {
     try {
@@ -220,6 +234,7 @@ export default function GamePage() {
       if (!res.ok) { setError("Game not found"); setLoading(false); return; }
       const data = await res.json();
       setGame(data);
+      setError("");
       setLoading(false);
     } catch {
       setError("Failed to load game");
@@ -233,14 +248,28 @@ export default function GamePage() {
     fetchGame();
   }, [gameId, fetchGame]);
 
+  // Pause polling when tab is hidden
   useEffect(() => {
     if (!game || game.status !== "playing") {
       clearInterval(pollRef.current);
       return;
     }
-    pollRef.current = setInterval(fetchGame, 3000);
-    return () => clearInterval(pollRef.current);
-  }, [game?.status, game?.turn, myColor, fetchGame]);
+
+    const startPolling = () => {
+      clearInterval(pollRef.current);
+      if (!document.hidden) pollRef.current = setInterval(fetchGame, 3000);
+    };
+
+    startPolling();
+    document.addEventListener("visibilitychange", startPolling);
+    return () => {
+      clearInterval(pollRef.current);
+      document.removeEventListener("visibilitychange", startPolling);
+    };
+  }, [game?.status, game?.turn, fetchGame]);
+
+  // Clean up retry timeout on unmount
+  useEffect(() => () => clearTimeout(retryRef.current), []);
 
   const handleMove = async (fromR, fromC, toR, toC, promoteTo) => {
     try {
@@ -256,9 +285,10 @@ export default function GamePage() {
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       setGame(data);
+      setError("");
     } catch {
       setError("Failed to send move. Retrying...");
-      setTimeout(fetchGame, 1000);
+      retryRef.current = setTimeout(fetchGame, 1000);
     }
   };
 
@@ -310,16 +340,21 @@ export default function GamePage() {
           <button
             className="btn btn-accent"
             onClick={async () => {
-              const res = await fetch(`/api/games/${gameId}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "join" }),
-              });
-              const data = await res.json();
-              if (data.color) {
-                sessionStorage.setItem(`chess:${gameId}`, data.color);
-                setMyColor(data.color);
-                setGame(data.game);
+              try {
+                const res = await fetch(`/api/games/${gameId}`, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "join" }),
+                });
+                const data = await res.json();
+                if (data.error) { setError(data.error); return; }
+                if (data.color) {
+                  sessionStorage.setItem(`chess:${gameId}`, data.color);
+                  setMyColor(data.color);
+                  setGame(data.game);
+                }
+              } catch {
+                setError("Failed to join game");
               }
             }}
           >
@@ -432,7 +467,7 @@ export default function GamePage() {
 
       {/* Board */}
       <div style={{ marginTop: 6 }}>
-        <Board game={game} myColor={myColor || "w"} onMove={handleMove} />
+        <Board game={game} myColor={myColor || "w"} inCheck={inCheck} onMove={handleMove} />
       </div>
 
       {/* Captured (mine) */}
